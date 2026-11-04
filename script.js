@@ -1,15 +1,64 @@
 
-// VENTORA launch frontend.
-// This static build is a visual prototype. Connect a secure backend
-// before accepting real accounts, storing user data, or processing payments.
+// ==========================================
+// VENTORA — Firebase-connected frontend
+// ==========================================
 
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+import { initializeApp } from
+  "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from
+  "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc,
+  serverTimestamp
+} from
+  "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+
+
+// ==========================================
+// 1. FIREBASE CONFIGURATION
+// ==========================================
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCBv7afAgzgspYUXPYUqQmCnNwBwMiXKrs",
+  authDomain: "ventora-814d4.firebaseapp.com",
+  projectId: "ventora-814d4",
+  storageBucket: "ventora-814d4.firebasestorage.app",
+  messagingSenderId: "93488308926",
+  appId: "1:93488308926:web:4d62488ba206c9e771b4ef",
+  measurementId: "G-1WQDDCHBKM"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+
+// ==========================================
+// 2. GENERAL VARIABLES
+// ==========================================
+
+const $ = (selector, root = document) =>
+  root.querySelector(selector);
+
+const $$ = (selector, root = document) =>
+  [...root.querySelectorAll(selector)];
 
 const modal = $('#modalBackdrop');
 const content = $('#modalContent');
 
 let selectedRole = 'reviewer';
+let currentUser = null;
 
 const roleInfo = {
   founder: {
@@ -29,10 +78,73 @@ const roleInfo = {
   }
 };
 
+
+// ==========================================
+// 3. AUTHENTICATION STATE
+// ==========================================
+
+onAuthStateChanged(auth, user => {
+  currentUser = user;
+
+  $$('[data-open="login"]').forEach(button => {
+    button.textContent = user ? 'Log out' : 'Log in';
+  });
+
+  if (user) {
+    console.log('VENTORA user signed in:', user.uid);
+  } else {
+    console.log('No user currently signed in.');
+  }
+});
+
+
+// ==========================================
+// 4. AUTHENTICATION ERROR MESSAGES
+// ==========================================
+
+function getAuthError(error) {
+  const errors = {
+    'auth/email-already-in-use':
+      'This email already has an account. Please log in.',
+
+    'auth/invalid-email':
+      'Please enter a valid email address.',
+
+    'auth/weak-password':
+      'Your password is too weak. Use at least 8 characters.',
+
+    'auth/user-not-found':
+      'No account found with this email address.',
+
+    'auth/wrong-password':
+      'Incorrect email or password.',
+
+    'auth/invalid-credential':
+      'Incorrect email or password.',
+
+    'auth/too-many-requests':
+      'Too many attempts. Please try again later.',
+
+    'auth/network-request-failed':
+      'Network error. Check your internet connection.',
+
+    'auth/operation-not-allowed':
+      'Email/password login is not enabled in Firebase.'
+  };
+
+  return errors[error.code] ||
+    'Something went wrong. Please try again.';
+}
+
+
+// ==========================================
+// 5. MODAL FUNCTIONS
+// ==========================================
+
 function openModal(mode = 'signup', role) {
   if (!modal || !content) return;
 
-  selectedRole = role || 'reviewer';
+  selectedRole = roleInfo[role] ? role : 'reviewer';
 
   const login = mode === 'login';
 
@@ -58,6 +170,11 @@ function closeModal() {
   modal.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('modal-open');
 }
+
+
+// ==========================================
+// 6. ACCOUNT REGISTRATION AND LOGIN
+// ==========================================
 
 function renderAccountForm(login = false) {
   if (!content) return;
@@ -93,7 +210,13 @@ function renderAccountForm(login = false) {
             : `
               <div class="form-field">
                 <label>YOUR NAME</label>
-                <input name="name" placeholder="Full name" required>
+                <input
+                  name="name"
+                  type="text"
+                  maxlength="80"
+                  placeholder="Full name"
+                  required
+                >
               </div>
             `
         }
@@ -125,7 +248,11 @@ function renderAccountForm(login = false) {
           ? `
             <div class="form-field">
               <label>STARTUP / PROJECT NAME (OPTIONAL)</label>
-              <input name="startup" placeholder="Your project name">
+              <input
+                name="startup"
+                maxlength="100"
+                placeholder="Your project name"
+              >
             </div>
           `
           : ''
@@ -143,18 +270,25 @@ function renderAccountForm(login = false) {
                 <option>Other / exploring</option>
               </select>
             </div>
+            <p class="form-message">
+              Investor identity verification will be a separate step.
+            </p>
           `
           : ''
       }
 
       <button class="btn btn-primary form-submit" type="submit">
-        ${login ? 'Log in' : `Create ${roleInfo[selectedRole].label.toLowerCase()} account`} ↗
+        ${login
+          ? 'Log in'
+          : `Create ${roleInfo[selectedRole].label.toLowerCase()} account`
+        } ↗
       </button>
 
       <div class="form-message" id="formMessage"></div>
     </form>
   `;
 
+  // Role selection
   $$('[data-role-choice]', content).forEach(button => {
     button.addEventListener('click', () => {
       selectedRole = button.dataset.roleChoice;
@@ -164,25 +298,136 @@ function renderAccountForm(login = false) {
 
   const accountForm = $('#accountForm', content);
 
-  accountForm.addEventListener('submit', event => {
+  accountForm.addEventListener('submit', async event => {
     event.preventDefault();
 
     const message = $('#formMessage', content);
+    const submitButton = $('button[type="submit"]', accountForm);
+
+    const formData = new FormData(accountForm);
+
+    const email = String(formData.get('email') || '')
+      .trim()
+      .toLowerCase();
+
+    const password = String(formData.get('password') || '');
+
+    const name = String(formData.get('name') || '').trim();
+
+    const startupName = String(formData.get('startup') || '').trim();
 
     message.style.display = 'block';
-    message.textContent =
-      'VENTORA account access is not active yet. This is a frontend preview. Connect Supabase Auth and a database before accepting real registrations. No information has been sent or stored.';
+    message.textContent = '';
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Please wait...';
+
+    try {
+
+      // LOGIN
+      if (login) {
+
+        const result = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+
+        const userRef = doc(db, 'users', result.user.uid);
+        const userSnapshot = await getDoc(userRef);
+
+        if (userSnapshot.exists()) {
+          const profile = userSnapshot.data();
+
+          message.textContent =
+            `Welcome back, ${profile.displayName || 'to VENTORA'}! Your account is connected.`;
+        } else {
+          message.textContent =
+            'You are signed in, but your profile has not been created yet. Please contact support.';
+        }
+
+        return;
+      }
+
+
+      // REGISTRATION
+      if (!name) {
+        throw new Error('Please enter your full name.');
+      }
+
+      if (password.length < 8) {
+        throw new Error('Password must contain at least 8 characters.');
+      }
+
+      const result = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+
+      // Save profile in Firestore
+      const userRef = doc(db, 'users', result.user.uid);
+
+      await setDoc(userRef, {
+        displayName: name,
+        email: result.user.email,
+        role: selectedRole,
+        startupName: startupName,
+        createdAt: serverTimestamp()
+      });
+
+      message.textContent =
+        `Welcome to VENTORA, ${name}! Your account has been created successfully.`;
+
+      console.log('VENTORA profile saved:', result.user.uid);
+
+    } catch (error) {
+
+      console.error('VENTORA authentication error:', error);
+
+      message.textContent =
+        error.message && !error.code
+          ? error.message
+          : getAuthError(error);
+
+    } finally {
+
+      submitButton.disabled = false;
+
+      submitButton.textContent = login
+        ? 'Log in'
+        : `Create ${roleInfo[selectedRole].label.toLowerCase()} account ↗`;
+    }
   });
 }
 
-// Open signup/login modal.
+
+// ==========================================
+// 7. OPEN SIGNUP / LOGIN / LOGOUT
+// ==========================================
+
 $$('[data-open]').forEach(button => {
-  button.addEventListener('click', () => {
-    openModal(button.dataset.open || 'signup', button.dataset.role);
+  button.addEventListener('click', async () => {
+
+    const mode = button.dataset.open;
+
+    if (mode === 'login' && currentUser) {
+      try {
+        await signOut(auth);
+        closeModal();
+        alert('You have logged out of VENTORA.');
+      } catch (error) {
+        console.error(error);
+        alert('Unable to log out. Please try again.');
+      }
+
+      return;
+    }
+
+    openModal(mode || 'signup', button.dataset.role);
   });
 });
 
-// Modal controls.
 $('#modalClose')?.addEventListener('click', closeModal);
 
 modal?.addEventListener('click', event => {
@@ -193,26 +438,38 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeModal();
 });
 
-// Idea category filters.
+
+// ==========================================
+// 8. IDEA CATEGORY FILTERS
+// ==========================================
+
 $$('.filter').forEach(button => {
   button.addEventListener('click', () => {
-    $$('.filter').forEach(item => item.classList.remove('active'));
+
+    $$('.filter').forEach(item =>
+      item.classList.remove('active')
+    );
+
     button.classList.add('active');
+
     filterIdeas();
   });
 });
 
-// Idea search.
 $('#ideaSearch')?.addEventListener('input', filterIdeas);
 
 function filterIdeas() {
   const searchInput = $('#ideaSearch');
+
   if (!searchInput) return;
 
-  const activeFilter = $('.filter.active')?.dataset.filter || 'all';
+  const activeFilter =
+    $('.filter.active')?.dataset.filter || 'all';
+
   const query = searchInput.value.toLowerCase();
 
   $$('.idea-card').forEach(card => {
+
     const matchesCategory =
       activeFilter === 'all' ||
       card.dataset.category === activeFilter;
@@ -220,50 +477,77 @@ function filterIdeas() {
     const searchContent =
       (card.dataset.search || '') + ' ' + card.innerText;
 
-    const matchesText = searchContent.toLowerCase().includes(query);
+    const matchesText =
+      searchContent.toLowerCase().includes(query);
 
     card.style.display =
       matchesCategory && matchesText ? '' : 'none';
   });
 }
 
-// Idea interaction.
+
+// ==========================================
+// 9. IDEA INTERACTION
+// ==========================================
+
 $$('[data-idea]').forEach(button => {
   button.addEventListener('click', () => {
+
     openModal('signup', 'reviewer');
 
     const intro = $('#modalIntro');
 
     if (intro) {
       intro.textContent =
-        `You selected “${button.dataset.idea}”. Create a free VENTORA reviewer account to rate and comment when the community backend is connected.`;
+        `You selected “${button.dataset.idea}”. Join VENTORA to participate in the community.`;
     }
   });
 });
 
-// Monthly/yearly pricing switch.
+
+// ==========================================
+// 10. MONTHLY / YEARLY PRICING
+// ==========================================
+
 $$('.billing').forEach(button => {
+
   button.addEventListener('click', () => {
-    $$('.billing').forEach(item => item.classList.remove('active'));
+
+    $$('.billing').forEach(item =>
+      item.classList.remove('active')
+    );
+
     button.classList.add('active');
 
     const yearly = button.dataset.billing === 'yearly';
 
     $$('[data-month]').forEach(element => {
+
       element.innerHTML =
-        (yearly ? element.dataset.year : element.dataset.month) +
+        (yearly
+          ? element.dataset.year
+          : element.dataset.month) +
         ` <small>/ ${yearly ? 'year' : 'month'}</small>`;
     });
   });
 });
 
-// Scroll reveal animation.
+
+// ==========================================
+// 11. SCROLL REVEAL ANIMATION
+// ==========================================
+
 if ('IntersectionObserver' in window) {
+
   const observer = new IntersectionObserver(
     entries => {
+
       entries.forEach(entry => {
+
         if (entry.isIntersecting) {
+
           entry.target.classList.add('visible');
+
           observer.unobserve(entry.target);
         }
       });
@@ -271,19 +555,31 @@ if ('IntersectionObserver' in window) {
     { threshold: 0.12 }
   );
 
-  $$('.reveal').forEach(element => observer.observe(element));
+  $$('.reveal').forEach(element =>
+    observer.observe(element)
+  );
+
 } else {
-  $$('.reveal').forEach(element => element.classList.add('visible'));
+
+  $$('.reveal').forEach(element =>
+    element.classList.add('visible')
+  );
 }
 
-// Subtle pointer tilt on desktop cards.
-// Disabled for touch devices and reduced-motion preferences.
+
+// ==========================================
+// 12. CARD POINTER TILT
+// ==========================================
+
 if (
   window.matchMedia('(hover:hover) and (pointer:fine)').matches &&
   !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 ) {
+
   $$('.tilt-card').forEach(card => {
+
     card.addEventListener('pointermove', event => {
+
       const rect = card.getBoundingClientRect();
 
       const x = (event.clientX - rect.left) / rect.width - 0.5;
