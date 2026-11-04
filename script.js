@@ -30,7 +30,7 @@ import {
 // ==========================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCBv7afAgzgspYUXPYUqQmCnNwBwMiXKrs",
+  apiKey: "AIzaSyBPogFnB436OVKtnQixSuE3GQ-h2LBF8bM",
   authDomain: "ventora-814d4.firebaseapp.com",
   projectId: "ventora-814d4",
   storageBucket: "ventora-814d4.firebasestorage.app",
